@@ -4,6 +4,11 @@ Reads Garmin's dailyHeartRate endpoint through the live, already-authorized
 client of the installed `garmin_connect` integration. No credentials are
 stored, copied or refreshed here: the source integration keeps full ownership
 of the session, including token rotation.
+
+Fetch cadence is a fixed 30-minute interval (user-approved), independent of
+the source integration's own poll rhythm: one fetch at startup, then one
+fetch per interval tick, with a guard that skips any attempt earlier than
+one full interval after the previous fetch.
 """
 
 from __future__ import annotations
@@ -14,19 +19,16 @@ from urllib.parse import quote
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, Event, EventStateChangedData
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import (
-    async_track_state_change_event,
-    async_track_time_interval,
-)
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
-from .const import DAILY_HR_URL, DOMAIN, SOURCE_INTEGRATION, SYNC_SENSOR
+from .const import DAILY_HR_URL, DOMAIN, SOURCE_INTEGRATION
 
 _LOGGER = logging.getLogger(__name__)
 
-SAFETY_INTERVAL = timedelta(hours=1)
+FETCH_INTERVAL = timedelta(minutes=30)
 
 
 async def async_setup_entry(
@@ -54,33 +56,30 @@ class GarminLatestHrSensor(SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_latest_hr"
         self._attr_native_value = None
         self._attr_extra_state_attributes = {"note": "no fetch yet"}
+        self._last_fetch: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the source integration's poll rhythm."""
-        await self._async_fetch()
-
-        self.async_on_remove(
-            async_track_state_change_event(
-                self.hass, [SYNC_SENSOR], self._handle_source_sync
-            )
-        )
+        """Fetch once, then poll Garmin at the approved 30-minute cadence."""
+        await self._async_fetch_throttled()
+        self.async_write_ha_state()
         self.async_on_remove(
             async_track_time_interval(
-                self.hass, self._handle_safety_tick, SAFETY_INTERVAL
+                self.hass, self._handle_interval_tick, FETCH_INTERVAL
             )
         )
 
-    async def _handle_source_sync(
-        self, event: Event[EventStateChangedData]
-    ) -> None:
-        """Refresh when the Garmin integration reports a new cloud poll."""
-        await self._async_fetch()
+    async def _handle_interval_tick(self, now: datetime) -> None:
+        """Thirty-minute cadence tick."""
+        await self._async_fetch_throttled()
         self.async_write_ha_state()
 
-    async def _handle_safety_tick(self, now: datetime) -> None:
-        """Hourly fallback in case the sync sensor stalls."""
+    async def _async_fetch_throttled(self) -> None:
+        """Fetch unless the previous fetch is newer than one full interval."""
+        now = datetime.now(timezone.utc)
+        if self._last_fetch is not None and now - self._last_fetch < FETCH_INTERVAL:
+            return
+        self._last_fetch = now
         await self._async_fetch()
-        self.async_write_ha_state()
 
     def _get_client(self):
         """Return the live Garmin client of the source integration, if any."""
@@ -155,5 +154,5 @@ class GarminLatestHrSensor(SensorEntity):
             "samples_today": len(samples),
             "source": "Garmin watch via Garmin Connect dailyHeartRate",
             "timestamp_basis": "heartRateValues epoch milliseconds (GMT)",
-            "rides_on": SYNC_SENSOR,
+            "poll_cadence": "every 30 minutes (user-approved)",
         }
