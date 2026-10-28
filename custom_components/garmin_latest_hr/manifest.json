@@ -1,1 +1,14 @@
-{"domain":"garmin_latest_hr","name":"Garmin Latest Heart Rate","codeowners":["@boris327"],"config_flow":true,"documentation":"https://github.com/boris327/ha-garmin-latest-hr","integration_type":"service","iot_class":"cloud_polling","issue_tracker":"https://github.com/boris327/ha-garmin-latest-hr/issues","requirements":[],"version":"0.1.0"}
+{
+  "domain": "garmin_latest_hr",
+  "name": "Garmin Latest Heart Rate",
+  "codeowners": [
+    "@boris327"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/boris327/ha-garmin-latest-hr",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/boris327/ha-garmin-latest-hr/issues",
+  "requirements": [],
+  "version": "0.1.1"
+}
